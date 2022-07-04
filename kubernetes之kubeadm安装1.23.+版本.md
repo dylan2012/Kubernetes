@@ -1,15 +1,16 @@
 # kubernetes之kubeadm安装1.23.+版本
 
 ## 一、基础环境准备
-集群规划信息：
 
-主机名称	IP地址	说明
-master01	192.168.10.51	master节点
-master02	192.168.10.52	master节点
-master03	192.168.10.53	master节点
-node01	192.168.10.54	node节点
-node02	192.168.10.55	node节点
-master-lb	192.168.10.50:16443	nginx组件监听地址
+集群规划信息：
+|  主机名称   | IP地址  | 说明  |
+|  ----  | ----  | ----  |
+|master01 | 192.168.10.51 | master节点
+|master02 |192.168.10.52 |master节点
+|master03 |192.168.10.53 |master节点
+|node01 |192.168.10.54 |node节点
+|node02 |192.168.10.55 |node节点
+|master-lb |192.168.10.50:16443 |nginx组件监听地址
 
 说明：
 
