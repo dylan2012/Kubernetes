@@ -189,16 +189,16 @@ http://192.168.10.51:30008/restart
 
 #### 2.3.2 配置 jenkins 连接到我们存在的 k8s 集群
 
+#### 1.jenkins安装在k8s
+
 访问 http://192.168.10.51:30008/configureClouds/
 
 新增一个云,在下拉菜单中选择 kubernets 并添加
 填写云 kubernetes 配置内容 - "Kubernetes Cloud details"
 
 名称：kubernetes
-//Kubernetes 地址：https://192.168.10.51:16443
 Kubernetes 地址：https://kubernetes.default.svc.cluster.local
 Kubernetes 命名空间：jenkins-k8s
-
 
 测试 jenkins 和 k8s 是否可以通信 点击 “连接测试”
 Connected to Kubernetes v1.24.1
@@ -207,6 +207,25 @@ Connected to Kubernetes v1.24.1
 Jenkins 地址：http://jenkins-service.jenkins-k8s.svc.cluster.local:8080
 
 应用------>保存
+
+#### 2.jenkins是外部接入
+
+在master节点
+
+```shell
+cat /root/.kube/config
+#替换<>值
+echo <certificate-authority-data>|base64 -d >ca.crt
+echo <client-key-data>|base64 -d >client.key
+echo <client-certificate-data>|base64 -d >client.crt
+openssl pkcs12 -export -out cert.pfx -inkey client.key -in client.crt -certfile ca.crt
+#输入密码并记住
+```
+
+添加凭据选择Certificate 把生成的cert.pfx上传并填入密码
+Kubernetes 地址：https://192.168.10.51:16443
+Jenkins 地址：http://192.168.10.55:8080/
+Kubernetes 命名空间：jenkins-k8s
 
 #### 2.3.3 配置 pod-template
 
