@@ -1,0 +1,26 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spider
+  namespace: devlopment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: spider
+  template:
+    metadata:
+      labels:
+        app: spider
+    spec:
+      containers:
+        - image: 10.199.10.237/my/spider:<BUILD_TAG>
+          imagePullPolicy: IfNotPresent
+          name: spider
+          stdin: true
+          tty: true
+          env:
+            - name: branch
+              value: <BRANCH_NAME>
+            - name: ASPNETCORE_ENVIRONMENT
+              value: Development

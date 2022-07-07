@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: devlopment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: api
+  template:
+    metadata:
+      labels:
+        app: api
+    spec:
+      containers:
+        - image: 10.199.10.237/my/api:<BUILD_TAG>
+          imagePullPolicy: IfNotPresent
+          name: api
+          env:
+            - name: branch
+              value: <BRANCH_NAME>
+          volumeMounts:
+          - name: application-configmap
+            mountPath: /app/application-dev.yml
+      volumes:
+      - name: application-configmap
+        configMap:
+          name: application-configmap
+          
+#创建configmap
+#kubectl create configmap application-configmap --from-file=application-dev.yml          
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  namespace: devlopment
+spec:
+  selector:
+    app: api
+  type: NodePort
+  ports:
+    - port: 8080
+      targetPort: 8080
+      nodePort: 31365

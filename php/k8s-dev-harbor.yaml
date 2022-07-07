@@ -1,0 +1,72 @@
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: php-fpm-nginx
+  namespace: devlopment
+spec:
+  selector:
+    matchLabels:
+      app: php-fpm-nginx
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: php-fpm-nginx
+    spec:
+      containers:
+        - name: php-fpm
+          image: 10.199.10.237/my/php:<BUILD_TAG>
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 9000
+          volumeMounts:
+            - mountPath: /var/www/html
+              name: nginx-www
+          lifecycle:
+            postStart:
+              exec:
+                command: ["/bin/sh", "-c", "cp -r /app/. /var/www/html"]
+            preStop:
+              exec:
+                command:
+                  - sh
+                  - '-c'
+                  - sleep 5 && kill -SIGQUIT 1
+        - name: nginx
+          image: nginx
+          env:
+            - name: branch
+              value: <BRANCH_NAME>
+          ports:
+            - containerPort: 80
+          volumeMounts:
+            - mountPath: /var/www/html
+              name: nginx-www
+            - mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+              name: nginx-config
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - sh
+                  - '-c'
+                  - sleep 5 && /usr/sbin/nginx -s quit
+      volumes:
+        - name: nginx-www
+          emptyDir: {}
+        - name: nginx-config
+          configMap:
+            name: nginx-config
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: php-fpm-nginx-svc
+spec:
+  selector:
+    app: php-fpm-nginx
+  ports:
+    - port: 80
+      targetPort: 80
+

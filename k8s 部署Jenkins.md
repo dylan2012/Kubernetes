@@ -189,7 +189,7 @@ http://192.168.10.51:30008/restart
 
 #### 2.3.2 配置 jenkins 连接到我们存在的 k8s 集群
 
-#### 1.jenkins安装在k8s
+##### 1.jenkins安装在k8s
 
 访问 http://192.168.10.51:30008/configureClouds/
 
@@ -208,7 +208,7 @@ Jenkins 地址：http://jenkins-service.jenkins-k8s.svc.cluster.local:8080
 
 应用------>保存
 
-#### 2.jenkins是外部接入
+##### 2.jenkins是外部接入
 
 在master节点
 
@@ -375,3 +375,35 @@ node('my-jnlp') {
 }
 
 ```
+
+### 2.4 结合gitlab自动化构建
+
+#### 2.4.1 Jenkins项目配置
+
+Jenkins安装插件：
+GitLab Plugin
+GitLab Authentication plugin
+Gitlab API Plugin
+Generic Webhook Trigger Plugin
+
+新建item 选择 流水线
+
+构建触发器 - Build when a change is pushed to GitLab. GitLab webhook URL: http://
+
+高级 - Generate 生成 Secret token
+
+记录 webhook URL 和 Secret token
+
+流水线 -- 定义 -- Pipeline script from SCM
+SCM git
+
+Repositories: <gitlab地址>
+Credentials - 添加 Username with password,填入gitlab用户名密码
+
+Branches to build - 指定分支（为空时代表any）
+
+脚本路径：Jenkinsfile
+
+保存
+
+#### 2.4.2 

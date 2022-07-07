@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pc
+  namespace: devlopment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pc
+  template:
+    metadata:
+      labels:
+        app: pc
+    spec:
+      containers:
+        - image: 10.199.10.237/my/pc_fe:<BUILD_TAG>
+          imagePullPolicy: IfNotPresent
+          name: pc
+          env:
+            - name: branch
+              value: <BRANCH_NAME>
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pc
+  namespace: devlopment
+spec:
+  selector:
+    app: pc
+  type: NodePort
+  ports:
+    - port: 80
+      targetPort: 80
+      nodePort: 31367

@@ -1,0 +1,29 @@
+node('my-jnlp') {
+    stage('Clone') {
+        echo "1.Clone Stage"
+		git branch: 'main', credentialsId: 'gitlab', url: 'http://10.199.10.241:8090/php.git'
+        script {
+            build_tag = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
+        }
+    }
+    stage('Package') {
+      echo "2.Test Stage"
+    }
+    stage('Build') {
+        echo "3.Build Docker Image Stage"
+        sh "docker build -t 10.199.10.237/my/php:${build_tag} ."
+    }
+    stage('Push') {
+        echo "4.Push Docker Image Stage"
+        withCredentials([usernamePassword(credentialsId: 'dockerharbor', passwordVariable: 'dockerHubPassword', usernameVariable: 'dockerHubUser')]) {
+            sh "docker login 10.199.10.237 -u ${dockerHubUser} -p ${dockerHubPassword}"
+            sh "docker push 10.199.10.237/my/php:${build_tag}"
+        }
+    }
+    stage('Deploy to dev') {
+        echo "5. Deploy DEV"
+		sh "sed -i 's/<BUILD_TAG>/${build_tag}/' k8s-dev-harbor.yaml"
+        sh "sed -i 's/<BRANCH_NAME>/${env.BRANCH_NAME}/' k8s-dev-harbor.yaml"
+        sh "kubectl apply -f k8s-dev-harbor.yaml  --validate=false"
+	}
+}
