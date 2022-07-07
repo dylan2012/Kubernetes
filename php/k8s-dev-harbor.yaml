@@ -22,6 +22,9 @@ spec:
           volumeMounts:
             - mountPath: /var/www/html
               name: nginx-www
+            - name: timezone
+              mountPath: /etc/localtime
+              readOnly: true
           lifecycle:
             postStart:
               exec:
@@ -40,6 +43,9 @@ spec:
           ports:
             - containerPort: 80
           volumeMounts:
+            - name: timezone
+              mountPath: /etc/localtime
+              readOnly: true
             - mountPath: /var/www/html
               name: nginx-www
             - mountPath: /etc/nginx/nginx.conf
@@ -53,6 +59,9 @@ spec:
                   - '-c'
                   - sleep 5 && /usr/sbin/nginx -s quit
       volumes:
+        - name: timezone
+          hostPath:
+            path: /etc/localtime
         - name: nginx-www
           emptyDir: {}
         - name: nginx-config

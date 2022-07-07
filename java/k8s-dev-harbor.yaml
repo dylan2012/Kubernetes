@@ -23,10 +23,17 @@ spec:
           volumeMounts:
           - name: application-configmap
             mountPath: /app/application-dev.yml
+          - name: timezone
+            mountPath: /etc/localtime
+            readOnly: true
       volumes:
+      - name: timezone
+          hostPath:
+            path: /etc/localtime
       - name: application-configmap
         configMap:
           name: application-configmap
+
           
 #创建configmap
 #kubectl create configmap application-configmap --from-file=application-dev.yml          

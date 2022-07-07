@@ -19,8 +19,16 @@ spec:
           name: spider
           stdin: true
           tty: true
+          volumeMounts:
+            - name: timezone
+              mountPath: /etc/localtime
+              readOnly: true
           env:
             - name: branch
               value: <BRANCH_NAME>
             - name: ASPNETCORE_ENVIRONMENT
               value: Development
+      volumes:
+        - name: timezone
+          hostPath:
+            path: /etc/localtime
