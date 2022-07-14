@@ -6,6 +6,16 @@ metadata:
 spec:
   ingressClassName: nginx
   rules:
+  - host: api.com
+    http:
+        paths:
+        - path: /
+          pathType: Prefix
+          backend:
+            service:
+              name: api
+              port:
+                number: 80
   - host: my.com
     http:
         paths:
