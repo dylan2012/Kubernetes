@@ -255,7 +255,7 @@ systemctl restart containerd
 #所有节点安装kubeadm
 yum list kubeadm.x86_64 --showduplicates | sort -r #查看所有版本
 #安装
-yum install -y kubeadm-1.24.1-0 kubelet-1.24.1-0 kubectl-1.24.1-0 
+yum install -y kubeadm-1.24.2-0 kubelet-1.24.2-0 kubectl-1.24.2-0 
 #重启kubelet
 systemctl daemon-reload && systemctl restart kubelet && systemctl enable kubelet && systemctl status kubelet
 #设置容器运行时
@@ -717,6 +717,9 @@ helm upgrade --install ingress-nginx ingress-nginx \
 
 #2.kubectl安装
 kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.2.0/deploy/static/provider/cloud/deploy.yaml
+
+#出现错误 Internal error occurred: failed calling webhook "validate.nginx.ingress.kubernetes.io": failed to call webhook: Post "https://ingress-nginx-controller-admission.ingress-nginx.svc:443/networking/v1/ingresses?timeout=10s": context deadline exceeded
+kubectl delete -A ValidatingWebhookConfiguration ingress-nginx-admission
 ```
 
 ## 五 补充内容

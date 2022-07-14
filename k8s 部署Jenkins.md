@@ -62,6 +62,7 @@ kubectl get pvc -n jenkins-k8s
 ### 2.2 Jenkins部署
 
 ```shell
+kubectl create ns jenkins-k8s
 kubectl create sa jenkins-k8s-sa -n jenkins-k8s
 kubectl create clusterrolebinding jenkins-k8s-sa-cluster -n jenkins-k8s --clusterrole=cluster-admin --serviceaccount=jenkins-k8s:jenkins-k8s-sa
 
