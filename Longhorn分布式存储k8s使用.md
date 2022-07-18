@@ -81,7 +81,7 @@ version.BuildInfo{Version:"v3.9.0", GitCommit:"7ceeda6c585217a19a1131663d8cd1f7d
 helm repo add longhorn https://charts.longhorn.io
 helm repo update
 helm  pull longhorn/longhorn
-tar xf longhorn-1.2.4.tgz
+tar xf longhorn*.tgz
 cd longhorn
 helm install longhorn  --namespace longhorn-system --create-namespace .
 ```
@@ -157,7 +157,9 @@ nginx-864d99d8db-l8pxc   1/1     Running   0          25s
 ```
 
 #### 2.修改配置
+
 存储类配置
+
 ```yaml
 persistence:
 #是否设置为默认存储类

@@ -733,11 +733,36 @@ kubectl run busybox --image busybox:1.28 --restart=Never --rm -it busybox -- sh
 nslookup kubernetes.default.svc.cluster.local
 ```
 
-### 命令
+### 5.2 重新生成token命令
 
 ```shell
 #重新生成加入节点命令
 kubeadm token create --print-join-command
 #标志工作节点
 kubectl label node node01 node-role.kubernetes.io/worker=worker
+```
+
+### 5.3 配置登录harbor
+
+```shell
+#docker
+cat /etc/docker/daemon.json
+{
+   "exec-opts": ["native.cgroupdriver=systemd"],
+   "insecure-registries": ["10.199.10.237"]
+}
+systemctl daemon-reload
+systemctl restart docker
+#containerd
+vi /etc/containerd/config.toml
+#增加后面
+[plugins."io.containerd.grpc.v1.cri".registry.configs]
+        [plugins."io.containerd.grpc.v1.cri".registry.configs."10.199.10.237".tls]
+          insecure_skip_verify = true
+        [plugins."io.containerd.grpc.v1.cri".registry.configs."10.199.10.237".auth]
+           username = "admin"
+           password = "Harbor12345"
+
+systemctl daemon-reload
+systemctl restart containerd
 ```

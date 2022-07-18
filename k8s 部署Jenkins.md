@@ -23,7 +23,7 @@ systemctl restart nfs
 
 ```shell
 kubectl create namespace jenkins-k8s
-cd /data/
+cd /data/jenkins
 cat >>pv.yaml<<EOF
 apiVersion: v1
 kind: PersistentVolume
@@ -85,6 +85,7 @@ spec:
       serviceAccount: jenkins-k8s-sa
       containers:
       - name: jenkins
+        #image:  jenkins/jenkins:latest
         image:  jenkins/jenkins:latest
         imagePullPolicy: IfNotPresent
         ports:
@@ -164,6 +165,31 @@ kubectl apply -f jenkins-service.yaml
 kubectl get svc -n jenkins-k8s
 ```
 
+#### docker安装jenkins
+
+```shell
+docker pull jenkins/jenkins:latest-jdk8
+docker images | grep jenkins
+cat > docker-compose.yml <<-EOF
+version: '3'
+services:                                     
+  docker_jenkins:
+    user: root                                
+    restart: always                           
+    image: jenkins/jenkins:latest-jdk8                
+    container_name: jenkins                   
+    ports:                                    
+      - 8080:8080
+      - 5000:5000
+    volumes:                                   
+      - /data/jenkins/jenkins_home:/var/jenkins_home 
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /usr/bin/docker:/usr/bin/docker               
+      - /usr/local/bin/docker-compose:/usr/local/bin/docker-compose
+EOF
+docker-compose up -d
+```
+
 ### 2.3 配置 Jenkins
 
 #### 2.3.1 初始化
@@ -219,6 +245,8 @@ cat /root/.kube/config
 echo <certificate-authority-data>|base64 -d >ca.crt
 echo <client-key-data>|base64 -d >client.key
 echo <client-certificate-data>|base64 -d >client.crt
+openssl version
+#OpenSSL 1.0.2k-fips  26 Jan 2017
 openssl pkcs12 -export -out cert.pfx -inkey client.key -in client.crt -certfile ca.crt
 #输入密码并记住
 ```
@@ -406,5 +434,3 @@ Branches to build - 指定分支（为空时代表any）
 脚本路径：Jenkinsfile
 
 保存
-
-#### 2.4.2 
