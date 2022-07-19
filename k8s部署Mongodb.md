@@ -53,6 +53,12 @@ replicaCount: 3
 persistence:
   enabled: true
   size: 2Gi
+
+service:
+  type: NodePort
+  nodePorts:
+    mongodb: "30217"
+
 ```
 
 ```shell
