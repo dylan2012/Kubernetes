@@ -10,7 +10,13 @@ systemctl start nfs
 systemctl enable nfs
 
 mkdir /data/jenkins -p
+mkdir /data/nfs/m2 -p
+mkdir /data/nfs/npm -p
+chmod 777 /data/nfs/m2
+chmod 777 /data/nfs/npm
 echo '/data/jenkins 192.168.10.0/24(rw,no_root_squash)' >> /etc/exports
+echo '/data/nfs/m2 *(rw,no_root_squash)' >> /etc/exports
+echo '/data/nfs/npm *(rw,no_root_squash)' >> /etc/exports
 exportfs -arv
 systemctl restart nfs
 ```
@@ -31,7 +37,7 @@ metadata:
   name: jenkins-k8s-pv
 spec:
   capacity:
-    storage: 10Gi
+    storage: 2Gi
   accessModes:
   - ReadWriteMany
   nfs:
@@ -50,7 +56,7 @@ metadata:
 spec:
   resources:
     requests:
-      storage: 10Gi
+      storage: 2Gi
   accessModes:
   - ReadWriteMany
 EOF
@@ -120,10 +126,22 @@ spec:
         - name: jenkins-volume
           subPath: jenkins-home
           mountPath: /var/jenkins_home
+        - name: jenkins-m2
+          mountPath: /root/.m2
+        - name: jenkins-npm
+          mountPath: /root/.npm
       volumes:
       - name: jenkins-volume
         persistentVolumeClaim:
           claimName: jenkins-k8s-pvc
+      - name: jenkins-m2
+        nfs:
+          server: 192.168.10.51 #替换IP
+          path: /data/nfs/m2
+      - name: jenkins-npm
+        nfs:
+          server: 192.168.10.51 #替换IP
+          path: /data/nfs/npm
 EOF
 kubectl apply -f jenkins-deployment.yaml
 #查看 jenkins 是否创建成功
@@ -268,7 +286,8 @@ Kubernetes 命名空间：jenkins-k8s
 点击"添加容器"
 
 名称: jnlp
-Docker 镜像: cnych/jenkins:jnlp6
+jdk8  Docker 镜像: cnych/jenkins:jnlp6
+jdk11 Docker 镜像：dylan2012/jenkins-jnlp:jdk11
 运行的命令: 清空
 命令参数: 清空
 勾选"分配伪终端"
@@ -283,6 +302,16 @@ Docker 镜像: cnych/jenkins:jnlp6
 
 主机路径: /root/.kube
 挂载路径: /root/.kube
+
+点击 “添加卷” 选择 "NFS Volume"
+
+服务地址: 192.168.10.51 #替换IP
+服务路径: /data/nfs/m2
+挂载路径: /root/.m2
+
+服务地址: 192.168.10.51 #替换IP
+服务路径: /data/nfs/npm
+挂载路径: /root/.npm
 
 最后 填入上面创建的sa
 Service Account: jenkins-k8s-sa
@@ -349,13 +378,13 @@ node('my-jnlp') {
     }
     stage('Deploy to dev') {
         echo "5. Deploy DEV"
-		sh "sed -i 's/<BUILD_TAG>/${build_tag}/' k8s-dev-harbor.yaml"
+        sh "sed -i 's/<BUILD_TAG>/${build_tag}/' k8s-dev-harbor.yaml"
         sh "sed -i 's/<BRANCH_NAME>/${env.BRANCH_NAME}/' k8s-dev-harbor.yaml"
         sh "sed -i 's/192.168.40.182/192.168.10.56/' k8s-dev-harbor.yaml"
         sh "kubectl apply -f k8s-dev-harbor.yaml  --validate=false"
-	}	
-	stage('Promote to qa') {	
-		def userInput = input(
+  }
+  stage('Promote to qa') {
+    def userInput = input(
             id: 'userInput',
 
             message: 'Promote to qa?',
@@ -371,7 +400,7 @@ node('my-jnlp') {
         if (userInput == "YES") {
             sh "sed -i 's/<BUILD_TAG>/${build_tag}/' k8s-qa-harbor.yaml"
             sh "sed -i 's/<BRANCH_NAME>/${env.BRANCH_NAME}/' k8s-qa-harbor.yaml"
-			sh "sed -i 's/192.168.40.182/192.168.10.56/' k8s-qa-harbor.yaml"
+            sh "sed -i 's/192.168.40.182/192.168.10.56/' k8s-qa-harbor.yaml"
             sh "kubectl apply -f k8s-qa-harbor.yaml --validate=false"
             sh "sleep 6"
             sh "kubectl get pods -n qatest"
@@ -379,8 +408,8 @@ node('my-jnlp') {
             //exit
         }
     }
-	stage('Promote to pro') {	
-		def userInput = input(
+  stage('Promote to pro') {	
+    def userInput = input(
 
             id: 'userInput',
             message: 'Promote to pro?',
@@ -396,7 +425,7 @@ node('my-jnlp') {
         if (userInput == "YES") {
             sh "sed -i 's/<BUILD_TAG>/${build_tag}/' k8s-prod-harbor.yaml"
             sh "sed -i 's/<BRANCH_NAME>/${env.BRANCH_NAME}/' k8s-prod-harbor.yaml"
-			sh "sed -i 's/192.168.40.182/192.168.10.56/' k8s-prod-harbor.yaml"
+            sh "sed -i 's/192.168.40.182/192.168.10.56/' k8s-prod-harbor.yaml"
             sh "cat k8s-prod-harbor.yaml"
             sh "kubectl apply -f k8s-prod-harbor.yaml --record --validate=false"
         }
@@ -410,10 +439,10 @@ node('my-jnlp') {
 #### 2.4.1 Jenkins项目配置
 
 Jenkins安装插件：
-GitLab Plugin
-GitLab Authentication plugin
-Gitlab API Plugin
-Generic Webhook Trigger Plugin
+GitLab
+GitLab Authentication
+Gitlab API
+Generic Webhook Trigger
 
 新建item 选择 流水线
 
