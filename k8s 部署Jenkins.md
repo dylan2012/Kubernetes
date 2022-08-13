@@ -63,6 +63,23 @@ EOF
 kubectl apply -f pvc.yaml
 #查看 pvc 是否创建成功
 kubectl get pvc -n jenkins-k8s
+
+#使用nfs-client storage class创建
+cat >pvc.yaml<<EOF
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: jenkins-k8s-pvc
+  namespace: jenkins-k8s
+spec:
+  storageClassName: nfs-client
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 1Gi
+EOF
+kubectl apply -f pvc.yaml
 ```
 
 ### 2.2 Jenkins部署

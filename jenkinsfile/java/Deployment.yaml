@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: <NAME>
+  namespace: <NAMESPACE>
+  labels:
+    image: <NAME>   #jenkinsfile中更新我使用lable进行筛选，这里必须设置
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: <NAME>
+  template:
+    metadata:
+      labels:
+        app: <NAME>
+    spec:
+      containers:
+        ports:
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+        - image: <REGISTRIES>/<NAME>:<TAG>
+          imagePullPolicy: IfNotPresent
+          name: <NAME>
+          env:
+            - name: branch
+              value: <BRANCH>
+          volumeMounts:
+          - name: timezone
+            mountPath: /etc/localtime
+            readOnly: true
+      volumes:
+      - name: timezone
+          hostPath:
+            path: /etc/localtime   
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: <NAME>
+  namespace: <NAMESPACE>
+spec:
+  selector:
+    app: <NAME>
+  type: NodePort
+  ports:
+    - port: 8080
+      targetPort: 8080
+      nodePort: 31365

@@ -1921,6 +1921,7 @@ kubectl logs deployment/velero -n velero | tail
 ```shell
 #创建nfs数据目录
 mkdir /nfs
+chmod 777 -R /nfs
 #所有节点安装nfs工具
 yum install nfs-utils -y
 #修改配置文件

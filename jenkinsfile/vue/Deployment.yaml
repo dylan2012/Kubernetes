@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: <NAME>
+  namespace: <NAMESPACE>
+  labels:
+    image: <NAME>
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: <NAME>
+  template:
+    metadata:
+      labels:
+        app: <NAME>
+    spec:
+      containers:
+        - image: <REGISTRIES>/<NAME>:<TAG>
+          imagePullPolicy: IfNotPresent
+          name: <NAME>
+          env:
+            - name: branch
+              value: <BRANCH_NAME>
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: <NAME>
+  namespace: <NAMESPACE>
+spec:
+  selector:
+    app: <NAME>
+  type: NodePort
+  ports:
+    - port: 80
+      targetPort: 80
+      nodePort: 31367

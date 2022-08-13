@@ -1,0 +1,160 @@
+pipeline {
+  //顶层环境变量设置
+  environment {
+    NAMESPACE = "test"                     //服务部署在那个namespace中
+    REGISTRIES = "10.199.10.237/test"      //生成镜像存放镜像的仓库地址
+    GIT = "http://10.199.10.241:8090/my/api.git"  //代码仓库地址
+    TAG = ""                               //镜像tag,会在下面生成,这里只是定义全局变量
+    NANE = ""                              //jenkins项目名称,会在下面生成,这里只是定义全局变量
+	DEPLOYMENT_FILE = "Deployment.yaml"    //k8s部署文件名
+  }
+  //全局配置
+  options {
+    timestamps()                     //所有输出每行都会打印时间戳
+    buildDiscarder(logRotator(numToKeepStr: '5'))  //保留5个历史构建版本
+  }
+  //手动构建时选择分支参数
+  parameters { 
+    gitParameter(branch: '', branchFilter: 'origin/(.*)', defaultValue: '', description: 'Branch for build and deploy', name: 'BRANCH', quickFilterEnabled: false, selectedValue: 'NONE', sortMode: 'NONE',  tagFilter: '*', type: 'PT_BRANCH')
+  }
+  //agent配置
+  agent {
+    kubernetes {
+      cloud 'kubernetes'
+      slaveConnectTimeout 1200
+      workspaceVolume emptyDirWorkspaceVolume()   //这里使用临时目录共享jenkins的工作目录默认路径为/home/jenkins/agent
+      yaml '''
+kind: Pod
+metadata:
+  name: jenkins-agent
+  namespace: jenkins-k8s
+spec:
+  containers:
+  - args: [\'$(JENKINS_SECRET)\', \'$(JENKINS_NAME)\']
+    image: 'jenkins/jnlp-slave:latest-jdk11'
+    name: jnlp    #这个容器必须有，保持默认即可
+    imagePullPolicy: IfNotPresent
+  - command:
+      - "cat"
+    image: "maven:3.8-jdk-11-slim"
+    imagePullPolicy: "IfNotPresent"
+    name: "maven"  #maven打包镜像
+    volumeMounts:  #持久化依赖包，重复构建不会进行重复下载 
+    - mountPath: "/root/.m2"  
+      name: mvn-data
+    tty: true
+  - command:
+      - "cat"
+    image: "10.199.10.237/bash/docker:alpine"
+    imagePullPolicy: "IfNotPresent"
+    name: "docker"  #docker容器需要挂载docker.sock文件，需要调度到有docker的node节点
+    tty: true
+    volumeMounts:
+    - mountPath: "/var/run/docker.sock"
+      name: "dockersock"
+      readOnly: false
+  volumes:          
+  - name: mvn-data
+    nfs:
+      server: 10.199.10.232
+      path: /data/nfs/m2
+  - hostPath:
+      path: "/var/run/docker.sock"
+    name: "dockersock"  
+  restartPolicy: Never
+#  nodeSelector:   #这里需要给有docker的node节点打标签调度Pod到这个节点
+#    build: true 
+'''
+    }
+  }
+  //具体流水线配置
+  stages {
+    //克隆代码
+    stage('git clone') {
+      //并行执行
+      failFast true  //并行执行的分支只要有一个失败立即结束流水线
+      parallel {
+        //手动执行jenkins流水线
+        stage('git clone by Jenkins') {
+          when {
+            expression {
+              env.gitlabBranch == null
+            }
+          }
+          steps {
+            git branch: "${BRANCH}", credentialsId: 'gitlab', url: "${GIT}"
+            script {
+              TAG = sh(returnStdout: true, script: "echo -n ${BRANCH}-${env.BUILD_ID}")
+            }
+          }
+        }
+        //gitlab触发构建
+        stage('git clone trigger') {
+          when {
+            expression {
+              env.gitlabBranch != null
+            }
+          }
+          steps {
+            git branch: "${env.gitlabBranch}", credentialsId: 'gitlab', url: "${GIT}"
+            script {
+              TAG = sh(returnStdout: true, script: "echo -n ${env.gitlabBranch}-${env.BUILD_ID}")
+            }
+          }
+        }
+        //初始化项目名称，项目名称用于docker镜像名称,不能有大写字母,转义
+        stage('init env') {
+          steps {
+            script {
+              NAME = sh(returnStdout: true, script: "echo -n ${env.JOB_NAME}").toLowerCase()
+            }
+            sh "echo ${NAME}"
+          }
+        }
+      }
+    }
+    //打包java程序
+    stage('mvn build') {
+      steps {
+        container(name: 'maven') {
+          sh "mvn package -DskipTests -Pdev"
+		  sh "mv target/api-0.0.1-SNAPSHOT.jar app.jar"
+          sh "ls -l"
+        }
+      }
+	}
+    //构建镜像并且推送镜像仓库
+    stage('docker build') {
+      environment {
+        HARBOR_USER = credentials('dockerharbor')  //获取镜像仓库认证信息
+      }
+      steps {
+        container(name: 'docker') {
+          sh "docker login -u ${HARBOR_USER_USR} -p ${HARBOR_USER_PSW} ${REGISTRIES}"
+          sh "docker build -t ${REGISTRIES}/${NAME}:${TAG} ."
+          sh "docker push ${REGISTRIES}/${NAME}:${TAG}"
+        }
+      }
+	}
+   //更新k8s相关应用
+    stage('update deploy') {
+      environment {
+        MY_KUBECONFIG = credentials('kubernetes-cluster')
+      }
+      steps {
+        container(name: 'docker') {
+		  sh "sed -i 's/<BUILD_TAG>/${TAG}/' $DEPLOYMENT_FILE"
+		  sh "sed -i 's/<NAMESPACE>/${NAMESPACE}/' $DEPLOYMENT_FILE"
+		  sh "sed -i 's/<REGISTRIES>/${REGISTRIES}/' $DEPLOYMENT_FILE"
+		  sh "sed -i 's/<NAME>/${NAME}/' $DEPLOYMENT_FILE"
+          sh "sed -i 's/<BRANCH>/${BRANCH}/' $DEPLOYMENT_FILE"
+          sh "kubectl apply -f $DEPLOYMENT_FILE  --validate=false --kubeconfig $MY_KUBECONFIG"
+		  
+          //sh "kubectl get deploy -n ${NAMESPACE} -l image=${NAME} --kubeconfig $MY_KUBECONFIG"
+          //sh "kubectl set image deploy -n ${NAMESPACE} -l image=${NAME} ${NAME}=${REGISTRIES}/${NAME}:${TAG} --kubeconfig $MY_KUBECONFIG"
+          //sh "kubectl rollout status deployment -n ${NAMESPACE} ${NAME} --timeout=60s --kubeconfig $MY_KUBECONFIG"
+        }
+      }
+	}
+  }
+}

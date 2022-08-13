@@ -1,0 +1,151 @@
+pipeline {
+  //顶层环境变量设置
+  environment {
+    NAMESPACE = "bolo"                      //服务部署在那个namespace中
+    REGISTRIES = "10.199.10.237/bolo"        //镜像仓库地址
+    GIT = "https://github.com/SD-Gaming/Vue3-Todo-List-AddName.git"  //代码仓库地址
+    TAG = ""                               //镜像tag,会在下面生成,这里只是定义全局变量
+    NANE = ""                              //jenkins项目名称,会在下面生成,这里只是定义全局变量
+	DEPLOYMENT_FILE = "Deployment.yaml"    //k8s部署文件名
+  }
+  //全局配置
+  options {
+    timestamps()                     //所有输出每行都会打印时间戳
+    buildDiscarder(logRotator(numToKeepStr: '5'))  //保留5个历史构建版本
+  }
+  //手动构建时选择分支参数
+  parameters { 
+    gitParameter(branch: '', branchFilter: 'origin/(.*)', defaultValue: '', description: 'Branch for build and deploy', name: 'BRANCH', quickFilterEnabled: false, selectedValue: 'NONE', sortMode: 'NONE',  tagFilter: '*', type: 'PT_BRANCH')
+  }
+  //agent配置
+  agent {
+    kubernetes {
+      cloud 'kubernetes'
+      slaveConnectTimeout 1200
+	  //pvc 持久化存储npm内容
+      workspaceVolume persistentVolumeClaimWorkspaceVolume(claimName: "npm-data", mountPath: "/", readOnly: "false")
+      yaml '''
+kind: Pod
+metadata:
+  name: jenkins-agent
+  namespace: jenkins-k8s
+spec:
+  containers:
+  - args: [\'$(JENKINS_SECRET)\', \'$(JENKINS_NAME)\']
+    image: 'jenkins/jnlp-slave:latest-jdk11'
+    name: jnlp
+    imagePullPolicy: IfNotPresent
+  - command:
+      - "cat"
+    image: "node:latest"
+    imagePullPolicy: "IfNotPresent"
+    name: "nodejs" 
+    tty: true
+  - command:
+      - "cat"
+    image: "10.199.10.237/bash/docker:alpine"
+    imagePullPolicy: "IfNotPresent"
+    name: "docker"
+    tty: true
+    volumeMounts:
+    - mountPath: "/var/run/docker.sock"
+      name: "dockersock"
+      readOnly: false
+  volumes:          
+  - hostPath:
+      path: "/var/run/docker.sock"
+    name: "dockersock"  
+  restartPolicy: Never
+#  nodeSelector:  
+#    build: true 
+'''
+    }
+  }
+  //具体流水线配置
+  stages {
+    //克隆代码
+    stage('git clone') {
+      //并行执行
+      failFast true  //并行执行的分支只要有一个失败立即结束流水线
+      parallel {
+        //手动执行jenkins流水线
+        stage('git clone by Jenkins') {
+          when {
+            expression {
+              env.gitlabBranch == null
+            }
+          }
+          steps {
+            git branch: "${BRANCH}", credentialsId: 'gitlab', url: "${GIT}"
+            script {
+              TAG = sh(returnStdout: true, script: "echo -n ${BRANCH}-${env.BUILD_ID}")
+            }
+          }
+        }
+        //gitlab触发构建
+        stage('git clone trigger') {
+          when {
+            expression {
+              env.gitlabBranch != null
+            }
+          }
+          steps {
+            git branch: "${env.gitlabBranch}", credentialsId: 'gitlab', url: "${GIT}"
+            script {
+              TAG = sh(returnStdout: true, script: "echo -n ${env.gitlabBranch}-${env.BUILD_ID}")
+            }
+          }
+        }
+        //初始化项目名称，项目名称用于docker镜像名称,不能有大写字母,转义
+        stage('init env') {
+          steps {
+            script {
+              NAME = sh(returnStdout: true, script: "echo -n ${env.JOB_NAME}").toLowerCase()
+            }
+            sh "echo ${NAME}"
+          }
+        }
+      }
+    }
+    stage('npm build') {
+      steps {
+        container(name: 'nodejs') {
+          sh "npm install --registry=https://registry.npm.taobao.org"
+          sh "npm run build"
+          sh "ls -l"
+        }
+      }
+	}
+    stage('docker build') {
+      environment {
+        HARBOR_USER = credentials('dockerharbor')
+      }
+      steps {
+        container(name: 'docker') {
+          sh "docker login -u ${HARBOR_USER_USR} -p ${HARBOR_USER_PSW} ${REGISTRIES}"
+          sh "docker build -t ${REGISTRIES}/${NAME}:${TAG} ."
+          sh "docker push ${REGISTRIES}/${NAME}:${TAG}"
+        }
+      }
+	}
+    stage('update deploy') {
+      environment {
+        MY_KUBECONFIG = credentials('kubernetes-cluster')
+      }
+      steps {
+        container(name: 'docker') {
+		  sh "sed -i 's/<BUILD_TAG>/${TAG}/' $DEPLOYMENT_FILE"
+		  sh "sed -i 's/<NAMESPACE>/${NAMESPACE}/' $DEPLOYMENT_FILE"
+		  sh "sed -i 's/<REGISTRIES>/${REGISTRIES}/' $DEPLOYMENT_FILE"
+		  sh "sed -i 's/<NAME>/${NAME}/' $DEPLOYMENT_FILE"
+          sh "sed -i 's/<BRANCH>/${BRANCH}/' $DEPLOYMENT_FILE"
+          sh "kubectl apply -f $DEPLOYMENT_FILE  --validate=false --kubeconfig $MY_KUBECONFIG"
+		  
+          //sh  "kubectl get deploy -n ${NAMESPACE} -l image=${NAME} --kubeconfig $MY_KUBECONFIG"
+          //sh  "kubectl set image deploy -n ${NAMESPACE} -l image=${NAME} ${NAME}=${REGISTRIES}/${NAME}:${TAG} --kubeconfig $MY_KUBECONFIG"
+          //sh  "kubectl rollout status deployment -n ${NAMESPACE} ${NAME} --timeout=60s --kubeconfig $MY_KUBECONFIG"
+        }
+      }
+	}
+  }
+}
