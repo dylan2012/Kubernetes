@@ -144,9 +144,9 @@ spec:
       }
       steps {
         container(name: 'docker') {
-		  sh "sed -i 's/<BUILD_TAG>/${TAG}/' $DEPLOYMENT_FILE"
+		  sh "sed -i 's/<TAG>/${TAG}/' $DEPLOYMENT_FILE"
 		  sh "sed -i 's/<NAMESPACE>/${NAMESPACE}/' $DEPLOYMENT_FILE"
-		  sh "sed -i 's/<REGISTRIES>/${REGISTRIES}/' $DEPLOYMENT_FILE"
+		  sh "sed -i 's@<REGISTRIES>@${REGISTRIES}@' $DEPLOYMENT_FILE"
 		  sh "sed -i 's/<NAME>/${NAME}/' $DEPLOYMENT_FILE"
           sh "sed -i 's/<BRANCH>/${BRANCH}/' $DEPLOYMENT_FILE"
           sh "kubectl apply -f $DEPLOYMENT_FILE  --validate=false --kubeconfig $MY_KUBECONFIG"
