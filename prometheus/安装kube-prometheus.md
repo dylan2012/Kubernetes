@@ -575,6 +575,9 @@ cat > service.yaml<<EOF
 apiVersion: v1
 kind: Service
 metadata:
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9104"
   labels:
     app: mysqld-exporter
   name: mysqld-exporter
@@ -645,6 +648,9 @@ subsets:
 apiVersion: v1
 kind: Service
 metadata:
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9104"
   name: mysql-metrics
   namespace: monitoring
   labels:
@@ -716,6 +722,9 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9121"
   labels:
     app: redis-exporter
   name: redis-exporter
@@ -782,6 +791,9 @@ subsets:
 apiVersion: v1
 kind: Service
 metadata:
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9121"
   name: redis-metrics
   namespace: monitoring
   labels:
