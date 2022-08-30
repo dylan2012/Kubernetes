@@ -1,0 +1,20 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    name: prometheus
+    kubernetes.io/cluster-service: 'true'
+  name: alertmanager
+  namespace: kube-monitor
+spec:
+  ports:
+  - name: alertmanager
+    nodePort: 30066
+    port: 9093
+    protocol: TCP
+    targetPort: 9093
+  selector:
+    app: prometheus
+  sessionAffinity: None
+  type: NodePort
