@@ -114,18 +114,6 @@ data:
         source_labels:
         - __meta_kubernetes_pod_name
         target_label: kubernetes_pod_name
-    - job_name: 'kubernetes-schedule'
-      scrape_interval: 5s
-      static_configs:
-      - targets: ['10.199.10.241:10259','10.199.10.242:10259','10.199.10.243:10259']
-    - job_name: 'kubernetes-controller-manager'
-      scrape_interval: 5s
-      static_configs:
-      - targets: ['10.199.10.241:10257','10.199.10.242:10257','10.199.10.243:10257']
-    - job_name: 'kubernetes-kube-proxy'
-      scrape_interval: 5s
-      static_configs:
-      - targets: ['10.199.10.243:10249','10.199.10.244:10249','10.199.10.245:10249']
     - job_name: 'kubernetes-etcd'
       scheme: https
       tls_config:

@@ -175,12 +175,64 @@ ingress角色为每个ingress的每个路径发现一个目标。这通常对黑
 ### 创建rbac授权
 
 ```shell
+#创建命名空间
+kubectl create namespace kube-monitor
 #创建一个 sa 账号 monitor
 kubectl create serviceaccount monitor -n kube-monitor
 #把 sa 账号 monitor 通过 clusterrolebing 绑定到 clusterrole 上
 kubectl create clusterrolebinding monitor-clusterrolebinding -n kube-monitor --clusterrole=cluster-admin --serviceaccount=kube-monitor:monitor
-#创建命名空间
-kubectl create namespace kube-monitor
+```
+
+如果不绑定cluster-admin，使用具体RABC授权prometheus-rbac.yaml
+
+```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: monitor
+  namespace: kube-monitor
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: monitor
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - nodes
+  - services
+  - endpoints
+  - pods
+  - nodes/proxy
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - configmaps
+  - nodes/metrics
+  verbs:
+  - get
+- nonResourceURLs:
+  - /metrics
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: monitor
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: monitor
+subjects:
+- kind: ServiceAccount
+  name: monitor
+  namespace: kube-monitor
 ```
 
 ### 创建数据目录
@@ -191,6 +243,19 @@ kind: PersistentVolumeClaim
 apiVersion: v1
 metadata:
   name: prometheus-pvc
+  namespace: kube-monitor
+spec:
+  storageClassName: nfs-client
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 1Gi
+---
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: alertmanager-pvc
   namespace: kube-monitor
 spec:
   storageClassName: nfs-client
@@ -471,79 +536,131 @@ cat >grafana.yaml <<EOF
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: monitoring-grafana
-  namespace: kube-system
+  name: grafana
+  namespace: kube-monitor
+  labels:
+    app: grafana
 spec:
-  replicas: 1
+  revisionHistoryLimit: 10
   selector:
     matchLabels:
-      task: monitoring
-      k8s-app: grafana
+      app: grafana
   template:
     metadata:
       labels:
-        task: monitoring
-        k8s-app: grafana
+        app: grafana
     spec:
       containers:
       - name: grafana
-        image: k8s.gcr.io/heapster-grafana-amd64:v5.0.4
+        image: grafana/grafana:latest
+        imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 3000
-          protocol: TCP
-        volumeMounts:
-        - mountPath: /etc/ssl/certs
-          name: ca-certificates
-          readOnly: true
-        - mountPath: /var
-          name: grafana-storage
+          name: grafana
         env:
-        - name: INFLUXDB_HOST
-          value: monitoring-influxdb
-        - name: GF_SERVER_HTTP_PORT
-          value: "3000"
-          # The following env variables are required to make Grafana accessible via
-          # the kubernetes api-server proxy. On production clusters, we recommend
-          # removing these env variables, setup auth for grafana, and expose the grafana
-          # service using a LoadBalancer or a public IP.
-        - name: GF_AUTH_BASIC_ENABLED
-          value: "false"
-        - name: GF_AUTH_ANONYMOUS_ENABLED
-          value: "true"
-        - name: GF_AUTH_ANONYMOUS_ORG_ROLE
-          value: Admin
-        - name: GF_SERVER_ROOT_URL
-          # If you're only using the API Server proxy, set this value instead:
-          # value: /api/v1/namespaces/kube-system/services/monitoring-grafana/proxy
-          value: /
+        - name: GF_SECURITY_ADMIN_USER
+          value: admin
+        - name: GF_SECURITY_ADMIN_PASSWORD
+          value: admin321
+        readinessProbe:
+          failureThreshold: 10
+          httpGet:
+            path: /api/health
+            port: 3000
+            scheme: HTTP
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 30
+        livenessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /api/health
+            port: 3000
+            scheme: HTTP
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 1
+        resources:
+          limits:
+            cpu: 100m
+            memory: 256Mi
+          requests:
+            cpu: 100m
+            memory: 256Mi
+        volumeMounts:
+        - mountPath: /var/lib/grafana
+          subPath: grafana
+          name: storage
+      securityContext:
+        fsGroup: 472
+        runAsUser: 472
       volumes:
-      - name: ca-certificates
-        hostPath:
-          path: /etc/ssl/certs
-      - name: grafana-storage
-        emptyDir: {}
+      - name: storage
+        persistentVolumeClaim:
+          claimName: grafana-pvc
+---
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: grafana-pvc
+  namespace: kube-monitor
+spec:
+  storageClassName: nfs-client
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 1Gi
 ---
 apiVersion: v1
 kind: Service
 metadata:
+  name: grafana
+  namespace: kube-monitor
   labels:
-    kubernetes.io/cluster-service: 'true'
-    kubernetes.io/name: monitoring-grafana
-  name: monitoring-grafana
-  namespace: kube-system
+    app: grafana
 spec:
-  ports:
-  - port: 80
-    targetPort: 3000
-  selector:
-    k8s-app: grafana
   type: NodePort
+  ports:
+    - port: 3000
+  selector:
+    app: grafana
+---
 EOF
+
+cat > grafana-chown.yaml<<EOF
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: grafana-chown
+  namespace: kube-monitor
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: grafana-chown
+        command: ["chown", "-R", "472:472", "/var/lib/grafana"]
+        image: busybox
+        imagePullPolicy: IfNotPresent
+        volumeMounts:
+        - name: storage
+          subPath: grafana
+          mountPath: /var/lib/grafana
+      volumes:
+      - name: storage
+        persistentVolumeClaim:
+          claimName: grafana-pvc
+EOF
+
 kubectl apply -f grafana.yaml
 #验证
-kubectl get pods -n kube-system -l task=monitoring
+kubectl get pods -n kube-monitor -l app=grafana
+#如果有权限报错可执行以下
+#kubectl apply -f grafana-chown.yaml
 #获取nodePort
-kubectl get svc -n kube-system | grep grafana
+kubectl get svc -n kube-monitor | grep grafana
 ```
 
 ### Grafana 接入Prometheus
@@ -670,7 +787,12 @@ kubectl get svc -n kube-system | grep kube-state-metrics
 Kubernetes Cluster (Prometheus).json
 Kubernetes cluster monitoring (via Prometheus).json
 
+除此之外，我们也可以前往 grafana dashboard 的页面去搜索其他的关于 Kubernetes 的监控页面，地址：https://grafana.com/dashboards，比如id 为747和741的这两个 dashboard。
+
 ## 四、配置 alertmanager
+
+官方告警方案：
+<https://prometheus.io/docs/alerting/latest/configuration/>
 
 ### 配置发送报警到 qq 邮箱
 
@@ -716,11 +838,12 @@ kubectl -n kube-monitor create secret generic etcd-certs --from-file=/etc/kubern
 #删除原来的重新部署
 kubectl delete -f prometheus-deploy.yaml
 kubectl apply -f prometheus-alertmanager-deploy.yaml
+kubectl apply -f alertmanager-svc.yaml
 
 kubectl get pods -n kube-monitor | grep prometheus
 ```
 
-浏览器打开 http://nodeIP:30066/#/alerts
+浏览器打开 http://nodeIP:NodePort/#/alerts
 
 访问 prometheus 的 web 界面
 点击 status->targets，可看到如下报错
@@ -729,12 +852,12 @@ kubectl get pods -n kube-monitor | grep prometheus
 
 vim /etc/kubernetes/manifests/kube-scheduler.yaml
 修改如下内容：
-把--bind-address=127.0.0.1 变成--bind-address=10.199.10.241
+把--bind-address=127.0.0.1 变成--bind-address=0.0.0.0
 把 httpGet:字段下的 hosts 由 127.0.0.1 变成 10.199.10.241
 把—port=0 删除
 
 vim /etc/kubernetes/manifests/kube-controller-manager.yaml
-把--bind-address=127.0.0.1 变成--bind-address=10.199.10.241
+把--bind-address=127.0.0.1 变成--bind-address=0.0.0.0
 把 httpGet:字段下的 hosts 由 127.0.0.1 变成 10.199.10.241
 把—port=0 删除
 
@@ -749,18 +872,360 @@ kubectl edit configmap kube-proxy -n kube-system
 kubectl get pods -n kube-system | grep kube-proxy |awk '{print
 $1}' | xargs kubectl delete pods -n kube-system
 
+热加载：curl -X POST  http://10.199.10.244:30090/-/reload
+
 ### 配置发送报警到钉钉
+
+新版grafana后台的Alert添加
 
 ### 配置发送报警到微信
 
+使用官方方案
+
+### 配置发送到telegram
+
+#### 创建 Telegrambot
+
+遵循 Telegram 文档中的指南：https ://core.telegram.org/bots#creating-a-new-bot 您将收到电报令牌 ID。我们将其存储并稍后使用。
+更改机器人加入群组，获取群组id： 我们需要用这个bot来发送消息，首先需要创建一个group，加入一些人，也可以不加人，同时将这个bot也加进去。然后在这个group中发送消息。类似 /hello @xxxxx_Bot 然后访问 https://api.telegram.org/botxxx:xxx/getUpdates xxx:xxx部分就是机器人的api token 需要妥善保管。 注意： 群组的chat_id就是上面的id，注意是负数，必须有-，机器人的chat_id则可以是正数。
+
+主要获取到两个内容：
+telegram-token：xxxxxx:xxxxxxxx
+chat_id: xxxxxx
+
+以下为另一种方案
+
+#### 创建和构建电报机器人 docker 镜像
+
+<https://github.com/inCaller/prometheus_bot>
+
+```shell
+git clone https://github.com/inCaller/prometheus_bot
+cd prometheus_bot/
+docker build -t prometheus-bot:0.0.1 .
+
+#在需要部署的目录创建配置文件
+mkdir -pv etc/telegrambot
+cat > etc/config.yaml <<EOF
+telegram_token: "telegram-token"
+template_path: "/etc/telegrambot/template.tmpl"
+time_zone: "Asia/Shanghai"
+split_token: "|"
+time_outdata: "02/01/2006 15:04:05"
+split_msg_byte: 4000
+EOF
+
+#模板文件，可以项目testdata里面复制
+cat > etc/telegrambot/template.tmpl <<EOF
+Type: {{.CommonAnnotations.description}}
+Summary: {{.CommonAnnotations.summary}}
+Alertname: {{ .CommonLabels.alertname }}
+Instance: {{ .CommonLabels.instance }}
+Serverity: {{ .CommonLabels.serverity}}
+Status:  {{ .Status }}
+EOF
+
+cat > docker-compose.yml <<EOF
+version: '3.3'
+services:
+  prometheus-bot:
+    container_name: telegrambot
+    image: prometheus-bot:0.0.1  #你的镜像仓库地址
+    volumes:
+      - ./etc/telegrambot/:/etc/telegrambot/:rw
+      - ./etc/config.yaml:/config.yaml:rw
+    ports:
+      - 9087:9087
+    restart: always
+EOF
+#启动
+docker-compose up -d
+#替换<chat-id> 测试发送
+curl -X POST http://127.0.0.1:9087/alert/<chat-id>
+```
+
+修改alertmanager-cm.yaml
+
+```yaml
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: alertmanager
+  namespace: kube-monitor
+data:
+  alertmanager.yml: |-
+    global:
+      resolve_timeout: 1m
+      smtp_smarthost: 'smtp.163.com:25'
+      smtp_from: 'xxxxxx@163.com'
+      smtp_auth_username: 'xxxxxx'
+      smtp_auth_password: 'password'
+      smtp_require_tls: false
+    route:
+      group_by: [alertname]
+      group_wait: 10s
+      group_interval: 10s
+      repeat_interval: 10m
+      receiver: telegram-webhook
+    receivers:
+    - name: 'telegram-webhook'
+      webhook_configs:
+      #替换IP 10.199.10.245
+      - url: http://10.199.10.245:9087/alert/<chat-id>
+        send_resolved: true
+    - name: 'default-receiver'
+      email_configs:
+      - to: 'xxxxxx@qq.com'
+        send_resolved: true
+```
+
+```shell
+kubectl delete -f alertmanager-cm.yaml
+kubectl apply -f alertmanager-cm.yaml
+#快速生效
+kubectl delete -f prometheus-alertmanager-deploy.yaml
+kubectl apply -f prometheus-alertmanager-deploy.yaml
+```
+
 ## 五、Prometheus 监控扩展
+
+已经配置好kubernetes-service-endpoints自动发现
+在配置 service 时加入下面的配置内容
+
+```yaml
+metadata:
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9121"
+```
 
 ### promethues 采集 tomcat 监控数据
 
 ### promethues 采集 redis 监控数据
 
+```shell
+cat > redis-exporter.yaml <<EOF
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis-exporter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis-exporter
+  template:
+    metadata:
+      labels:
+        app: redis-exporter
+    spec:
+      containers:
+      - name: redis-exporter
+        imagePullPolicy: Always
+        env:
+        - name: REDIS_ADDR
+          value: "redis-master.default.svc:6379"
+        - name: REDIS_PASSWORD
+          value: "redis123"
+        - name: REDIS_EXPORTER_DEBUG
+          value: "1"
+        image: oliver006/redis_exporter
+        ports:
+        - containerPort: 9121
+          name: redis-exporter
+---
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9121"
+  labels:
+    app: redis-exporter
+  name: redis-exporter
+spec:
+  ports:
+  - name: redis-exporter
+    port: 9121
+    protocol: TCP
+    targetPort: 9121
+  type: NodePort
+  selector:
+    app: redis-exporter
+EOF
+
+kubectl apply -f redis-exporter.yaml
+```
+
+登录grafana导入模版ID为763
+
 ### Prometheus 监控 mysql
 
+https://github.com/prometheus/mysqld_exporter
+
+```shell
+#mysql授权
+CREATE USER 'exporter'@'localhost' IDENTIFIED BY 'exporter123' WITH MAX_USER_CONNECTIONS 3;
+GRANT PROCESS, REPLICATION CLIENT, SELECT ON *.* TO 'exporter'@'%';
+```
+
+```shell
+cat >deployment.yaml<<EOF
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mysqld-exporter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysqld-exporter 
+  template:
+    metadata:
+      labels:
+        app: mysqld-exporter
+    spec:
+      containers:
+      - name: mysqld-exporter
+        imagePullPolicy: IfNotPresent 
+        env:
+          - name: DATA_SOURCE_NAME
+            value: "exporter:exporter123@(mysql.default.svc:3306)/"
+        image: prom/mysqld-exporter
+        ports:
+        - containerPort: 9104
+          name: mysqld-exporter
+EOF
+
+cat > service.yaml<<EOF
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9104"
+  labels:
+    app: mysqld-exporter
+  name: mysqld-exporter
+spec:
+  ports:
+  - name: mysqld-exporter
+    port: 9104
+    protocol: TCP
+    targetPort: 9104
+  type: NodePort
+  selector:
+    app: mysqld-exporter
+EOF
+
+kubectl apply -f deployment.yaml
+kubectl apply -f service.yaml
+```
+
+登录grafana 导入模板 ID 为 7362
+
 ### Prometheus 监控 nginx
+
+#### 自行编译
+
+1、下载模块
+https://github.com/vozlt/nginx-module-vts/releases
+2、编译
+编译参数添加--add-module=/path/to/nginx-module-vts
+3、配置状态访问接口
+
+```html
+location /status{
+        allow  127.0.0.1;
+        deny all;
+        vhost_traffic_status_display;
+        vhost_traffic_status_display_format html;
+}
+
+
+http {
+...
+      # nginx-vts
+        vhost_traffic_status_zone;
+        vhost_traffic_status_filter_by_host on;   #开启此功能，会根据不同的server_name进行流量的统计，否则默认会把流量全部计算到第一个上。
+        vhost_traffic_status_filter on;
+        vhost_traffic_status_filter_by_set_key $status $server_name;
+...
+}  
+```
+
+此外还有基于地理信息的统计，根据访问量或访问流量对nginx
+做访问限制，详细使用见文档：https://github.com/vozlt/nginx-module-vts#installation
+
+#### 准备镜像
+
+Nginx with the VTS module (https://github.com/vozlt/nginx-module-vts) and the prometheus exporter (https://github.com/hnlq715/nginx-vts-exporter)
+
+直接找带vts模块的Nginx，可以用 https://hub.docker.com/r/skyscrapers/nginx
+再找vts-exporter，可以用 https://hub.docker.com/r/arquivei/nginx-vts
+
+```shell
+cat > nginx-vts.yaml <<EOF
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+      - name: nginx
+        image: skyscrapers/nginx:latest
+        resources:
+          requests:
+            cpu: 100m
+            memory: 100Mi
+        ports:
+        - containerPort: 80
+      - name: nginx-exporter
+        image: arquivei/nginx-vts:latest
+        command: ["/bin/sh","-c","--"]
+        args: ["nginx-vts-exporter -nginx.scrape_uri=http://localhost:9999/status/format/json"]
+        resources:
+          requests:
+            cpu: 100m
+            memory: 100Mi
+        ports:
+        - containerPort: 9913
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: nginx
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9913"
+spec:
+  type: NodePort
+  selector:
+   app: nginx
+  ports:
+  - name: nginx
+    port: 80
+    targetPort: 80
+  - name: prom
+    port: 9913
+    targetPort: 9913
+EOF
+
+kubectl apply -f nginx-vts.yaml
+kubectl get svc
+```
+
+浏览器打开 http://nodeip:nodeport/metrics
+
+grafana导入模板2948
 
 ### Prometheus 监控 mongodb

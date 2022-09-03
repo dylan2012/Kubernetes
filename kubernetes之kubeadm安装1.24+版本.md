@@ -793,6 +793,9 @@ kubectl taint nodes master03 node-role.kubernetes.io/control-plane-
 kubectl taint nodes master03 node-role.kubernetes.io/master-
 #不允许master节点调度
 kubectl taint nodes master01 node-role.kubernetes.io/master=:NoSchedule
+
+#新增master节点命令
+echo "$(kubeadm token create --print-join-command) --control-plane --certificate-key $(kubeadm init phase upload-certs --upload-certs | tail -1)"
 ```
 
 ### 5.3 配置登录harbor

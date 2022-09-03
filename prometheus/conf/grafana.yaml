@@ -1,77 +1,94 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: monitoring-grafana
-  namespace: kube-system
+  name: grafana
+  namespace: kube-monitor
+  labels:
+    app: grafana
 spec:
-  replicas: 1
+  revisionHistoryLimit: 10
   selector:
     matchLabels:
-      task: monitoring
-      k8s-app: grafana
+      app: grafana
   template:
     metadata:
       labels:
-        task: monitoring
-        k8s-app: grafana
+        app: grafana
     spec:
       containers:
       - name: grafana
-        image: k8s.gcr.io/heapster-grafana-amd64:v5.0.4
+        image: grafana/grafana:latest
+        imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 3000
-          protocol: TCP
-        volumeMounts:
-        - mountPath: /etc/ssl/certs
-          name: ca-certificates
-          readOnly: true
-        - mountPath: /var
-          name: grafana-storage
+          name: grafana
         env:
-        - name: INFLUXDB_HOST
-          value: monitoring-influxdb
-        - name: GF_SERVER_HTTP_PORT
-          value: "3000"
-          # The following env variables are required to make Grafana accessible via
-          # the kubernetes api-server proxy. On production clusters, we recommend
-          # removing these env variables, setup auth for grafana, and expose the grafana
-          # service using a LoadBalancer or a public IP.
-        - name: GF_AUTH_BASIC_ENABLED
-          value: "false"
-        - name: GF_AUTH_ANONYMOUS_ENABLED
-          value: "true"
-        - name: GF_AUTH_ANONYMOUS_ORG_ROLE
-          value: Admin
-        - name: GF_SERVER_ROOT_URL
-          # If you're only using the API Server proxy, set this value instead:
-          # value: /api/v1/namespaces/kube-system/services/monitoring-grafana/proxy
-          value: /
+        - name: GF_SECURITY_ADMIN_USER
+          value: admin
+        - name: GF_SECURITY_ADMIN_PASSWORD
+          value: admin321
+        readinessProbe:
+          failureThreshold: 10
+          httpGet:
+            path: /api/health
+            port: 3000
+            scheme: HTTP
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 30
+        livenessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /api/health
+            port: 3000
+            scheme: HTTP
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 1
+        resources:
+          limits:
+            cpu: 100m
+            memory: 256Mi
+          requests:
+            cpu: 100m
+            memory: 256Mi
+        volumeMounts:
+        - mountPath: /var/lib/grafana
+          subPath: grafana
+          name: storage
+      securityContext:
+        fsGroup: 472
+        runAsUser: 472
       volumes:
-      - name: ca-certificates
-        hostPath:
-          path: /etc/ssl/certs
-      - name: grafana-storage
-        emptyDir: {}
+      - name: storage
+        persistentVolumeClaim:
+          claimName: grafana-pvc
+---
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: grafana-pvc
+  namespace: kube-monitor
+spec:
+  storageClassName: nfs-client
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 1Gi
 ---
 apiVersion: v1
 kind: Service
 metadata:
+  name: grafana
+  namespace: kube-monitor
   labels:
-    # For use as a Cluster add-on (https://github.com/kubernetes/kubernetes/tree/master/cluster/addons)
-    # If you are NOT using this as an addon, you should comment out this line.
-    kubernetes.io/cluster-service: 'true'
-    kubernetes.io/name: monitoring-grafana
-  name: monitoring-grafana
-  namespace: kube-system
+    app: grafana
 spec:
-  # In a production setup, we recommend accessing Grafana through an external Loadbalancer
-  # or through a public IP.
-  # type: LoadBalancer
-  # You could also use NodePort to expose the service at a randomly-generated port
-  # type: NodePort
-  ports:
-  - port: 80
-    targetPort: 3000
-  selector:
-    k8s-app: grafana
   type: NodePort
+  ports:
+    - port: 3000
+  selector:
+    app: grafana
+---

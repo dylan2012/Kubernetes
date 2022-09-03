@@ -8,18 +8,22 @@ data:
     global:
       resolve_timeout: 1m
       smtp_smarthost: 'smtp.163.com:25'
-      smtp_from: '15011572657@163.com'
-      smtp_auth_username: '15011572657'
-      smtp_auth_password: 'BGWHYUOSOOHWEUJM'
+      smtp_from: 'xxxxxx@163.com'
+      smtp_auth_username: 'xxxxxx'
+      smtp_auth_password: 'password'
       smtp_require_tls: false
     route:
       group_by: [alertname]
       group_wait: 10s
       group_interval: 10s
       repeat_interval: 10m
-      receiver: default-receiver
+      receiver: telegram-webhook
     receivers:
+    - name: 'telegram-webhook'
+      webhook_configs:
+      - url: http://10.199.10.245:9087/alert/-2666666
+        send_resolved: true
     - name: 'default-receiver'
       email_configs:
-      - to: '1980570647@qq.com'
+      - to: 'xxxxxx@qq.com'
         send_resolved: true
