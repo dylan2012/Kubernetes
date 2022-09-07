@@ -796,6 +796,15 @@ kubectl taint nodes master01 node-role.kubernetes.io/master=:NoSchedule
 
 #新增master节点命令
 echo "$(kubeadm token create --print-join-command) --control-plane --certificate-key $(kubeadm init phase upload-certs --upload-certs | tail -1)"
+
+#移除节点
+kubectl drain node03 --ignore-daemonsets
+kubectl delete node node03
+
+#如果是master节点还需要移除etcd member
+kubectl exec -it -n kube-system etcd-master1 -- /bin/sh
+etcdctl --endpoints 127.0.0.1:2379 --cacert /etc/kubernetes/pki/etcd/ca.crt --cert /etc/kubernetes/pki/etcd/server.crt --key /etc/kubernetes/pki/etcd/server.key member list
+etcdctl --endpoints 127.0.0.1:2379 --cacert /etc/kubernetes/pki/etcd/ca.crt --cert /etc/kubernetes/pki/etcd/server.crt --key /etc/kubernetes/pki/etcd/server.key member remove 11137f5ec2b3458
 ```
 
 ### 5.3 配置登录harbor
