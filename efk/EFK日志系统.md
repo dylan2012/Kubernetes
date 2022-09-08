@@ -729,5 +729,10 @@ data:
                                         #   drop_oldest_chunk，block方式为阻止输入事件发送到缓冲区。
         compress gzip               #开启gzip提高日志
       </buffer>
+      <secondary>
+        @type secondary_file
+        directory /tmp/fluentd
+        basename bad-chunk-${chunk_id}
+      </secondary>
     </match>
 ```
