@@ -59,7 +59,7 @@ spec:
         - ReadWriteOnce
         resources:
           requests:
-            storage: 2Gi
+            storage: 5Gi
         storageClassName: nfs-client
 EOF
 
@@ -73,7 +73,7 @@ PASSWORD=$(kubectl get secret -n elastic-system elastic-es-elastic-user -o go-te
 echo $PASSWORD
 #curl -u "elastic:$PASSWORD" -k "https://elastic-es-http.elastic-system.svc:9200"
 
-kubectl port-forward service/elastic-es-http 9200
+kubectl port-forward service/elastic-es-http 9200 -n elastic-system
 curl -u "elastic:$PASSWORD" -k "https://localhost:9200"
 
 {
@@ -116,7 +116,7 @@ NAME     HEALTH   NODES   VERSION   AGE
 kibana   green    1       8.4.1     115s
 
 kubectl edit service kibana-kb-http -n elastic-system
-#修改为 type: NodePort
+#修改type: ClusterIP 为 type: NodePort
 kubectl get service kibana-kb-http -n elastic-system
 
 # 默认用户： elastic 
@@ -176,6 +176,351 @@ spec:
 EOF
 
 kubectl get apmservers -n elastic-system
+```
+
+## 部署elastic agent
+
+```shell
+#kubectl apply -f https://raw.githubusercontent.com/elastic/cloud-on-k8s/2.4/config/recipes/elastic-agent/kubernetes-integration.yaml
+
+cat > elastic-agent.yaml <<EOF
+apiVersion: agent.k8s.elastic.co/v1alpha1
+kind: Agent
+metadata:
+  name: elastic-agent
+  namespace: elastic-system
+spec:
+  version: 8.4.1
+  elasticsearchRefs:
+  - name: elastic
+  daemonSet:
+    podTemplate:
+      spec:
+        automountServiceAccountToken: true
+        serviceAccountName: elastic-agent
+        containers:
+        - name: agent
+          securityContext:
+            runAsUser: 0
+          env:
+          - name: NODE_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: spec.nodeName
+  config:
+    id: 488e0b80-3634-11eb-8208-57893829af4e
+    revision: 2
+    agent:
+      monitoring:
+        enabled: true
+        use_output: default
+        logs: true
+        metrics: true
+    inputs:
+    - id: 678daef0-3634-11eb-8208-57893829af4e
+      name: kubernetes-1
+      revision: 1
+      type: kubernetes/metrics
+      use_output: default
+      meta:
+        package:
+          name: kubernetes
+          version: 0.2.8
+      data_stream:
+        namespace: k8s
+      streams:
+      - id: kubernetes/metrics-kubernetes.apiserver
+        data_stream:
+          dataset: kubernetes.apiserver
+          type: metrics
+        metricsets:
+        - apiserver
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        hosts:
+        - 'https://${env.KUBERNETES_SERVICE_HOST}:${env.KUBERNETES_SERVICE_PORT}'
+        period: 30s
+        ssl.certificate_authorities:
+        - /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+      - id: kubernetes/metrics-kubernetes.container
+        data_stream:
+          dataset: kubernetes.container
+          type: metrics
+        metricsets:
+        - container
+        add_metadata: true
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        hosts:
+        - 'https://${env.NODE_NAME}:10250'
+        period: 10s
+        ssl.verification_mode: none
+      - id: kubernetes/metrics-kubernetes.event
+        data_stream:
+          dataset: kubernetes.event
+          type: metrics
+        metricsets:
+        - event
+        period: 10s
+        add_metadata: true
+      - id: kubernetes/metrics-kubernetes.node
+        data_stream:
+          dataset: kubernetes.node
+          type: metrics
+        metricsets:
+        - node
+        add_metadata: true
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        hosts:
+        - 'https://${env.NODE_NAME}:10250'
+        period: 10s
+        ssl.verification_mode: none
+      - id: kubernetes/metrics-kubernetes.pod
+        data_stream:
+          dataset: kubernetes.pod
+          type: metrics
+        metricsets:
+        - pod
+        add_metadata: true
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        hosts:
+        - 'https://${env.NODE_NAME}:10250'
+        period: 10s
+        ssl.verification_mode: none
+      - id: kubernetes/metrics-kubernetes.system
+        data_stream:
+          dataset: kubernetes.system
+          type: metrics
+        metricsets:
+        - system
+        add_metadata: true
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        hosts:
+        - 'https://${env.NODE_NAME}:10250'
+        period: 10s
+        ssl.verification_mode: none
+      - id: kubernetes/metrics-kubernetes.volume
+        data_stream:
+          dataset: kubernetes.volume
+          type: metrics
+        metricsets:
+        - volume
+        add_metadata: true
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        hosts:
+        - 'https://${env.NODE_NAME}:10250'
+        period: 10s
+        ssl.verification_mode: none
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: elastic-agent
+rules:
+- apiGroups: [""] # "" indicates the core API group
+  resources:
+  - namespaces
+  - pods
+  - nodes
+  - nodes/metrics
+  - nodes/proxy
+  - nodes/stats
+  - events
+  verbs:
+  - get
+  - watch
+  - list
+- nonResourceURLs:
+  - /metrics
+  verbs:
+  - get
+  - watch
+  - list
+- apiGroups: ["coordination.k8s.io"]
+  resources:
+    - leases
+  verbs:
+    - get
+    - create
+    - update
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: elastic-agent
+  namespace: elastic-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: elastic-agent
+subjects:
+- kind: ServiceAccount
+  name: elastic-agent
+  namespace: elastic-system
+roleRef:
+  kind: ClusterRole
+  name: elastic-agent
+  apiGroup: rbac.authorization.k8s.io
+EOF
+
+kubectl apply -f elastic-agent.yaml
+
+kubectl get agent -n elastic-system
+kubectl get pods -n elastic-system
+kubectl logs -f elastic-agent-agent-4n27s -n elastic-system
+
+curl -u "elastic:$PASSWORD" -k "https://localhost:9200/metrics-system.cpu-*/_search"
+```
+
+## 部署Fleet
+
+完整的部署方案，包含Fleet Server, Elastic Agents, Elasticsearch, Kibana
+
+```shell
+cat <<EOF | kubectl apply -f -
+apiVersion: agent.k8s.elastic.co/v1alpha1
+kind: Agent
+metadata:
+  name: fleet-server-quickstart
+  namespace: default
+spec:
+  version: 8.4.1
+  kibanaRef:
+    name: kibana-quickstart
+  elasticsearchRefs:
+  - name: elasticsearch-quickstart
+  mode: fleet
+  fleetServerEnabled: true
+  deployment:
+    replicas: 1
+    podTemplate:
+      spec:
+        serviceAccountName: elastic-agent
+        automountServiceAccountToken: true
+        securityContext:
+          runAsUser: 0
+---
+apiVersion: agent.k8s.elastic.co/v1alpha1
+kind: Agent
+metadata:
+  name: elastic-agent-quickstart
+  namespace: default
+spec:
+  version: 8.4.1
+  kibanaRef:
+    name: kibana-quickstart
+  fleetServerRef:
+    name: fleet-server-quickstart
+  mode: fleet
+  daemonSet:
+    podTemplate:
+      spec:
+        serviceAccountName: elastic-agent
+        automountServiceAccountToken: true
+        securityContext:
+          runAsUser: 0
+---
+apiVersion: kibana.k8s.elastic.co/v1
+kind: Kibana
+metadata:
+  name: kibana-quickstart
+  namespace: default
+spec:
+  version: 8.4.1
+  count: 1
+  elasticsearchRef:
+    name: elasticsearch-quickstart
+  config:
+    xpack.fleet.agents.elasticsearch.hosts: ["https://elasticsearch-quickstart-es-http.default.svc:9200"]
+    xpack.fleet.agents.fleet_server.hosts: ["https://fleet-server-quickstart-agent-http.default.svc:8220"]
+    xpack.fleet.packages:
+      - name: system
+        version: latest
+      - name: elastic_agent
+        version: latest
+      - name: fleet_server
+        version: latest
+    xpack.fleet.agentPolicies:
+      - name: Fleet Server on ECK policy
+        id: eck-fleet-server
+        is_default_fleet_server: true
+        namespace: default
+        monitoring_enabled:
+          - logs
+          - metrics
+        unenroll_timeout: 900
+        package_policies:
+        - name: fleet_server-1
+          id: fleet_server-1
+          package:
+            name: fleet_server
+      - name: Elastic Agent on ECK policy
+        id: eck-agent
+        namespace: default
+        monitoring_enabled:
+          - logs
+          - metrics
+        unenroll_timeout: 900
+        is_default: true
+        package_policies:
+          - name: system-1
+            id: system-1
+            package:
+              name: system
+---
+apiVersion: elasticsearch.k8s.elastic.co/v1
+kind: Elasticsearch
+metadata:
+  name: elasticsearch-quickstart
+  namespace: default
+spec:
+  version: 8.4.1
+  nodeSets:
+  - name: default
+    count: 3
+    config:
+      node.store.allow_mmap: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: elastic-agent
+rules:
+- apiGroups: [""] # "" indicates the core API group
+  resources:
+  - pods
+  - nodes
+  - namespaces
+  verbs:
+  - get
+  - watch
+  - list
+- apiGroups: ["coordination.k8s.io"]
+  resources:
+  - leases
+  verbs:
+  - get
+  - create
+  - update
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: elastic-agent
+  namespace: default
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: elastic-agent
+subjects:
+- kind: ServiceAccount
+  name: elastic-agent
+  namespace: default
+roleRef:
+  kind: ClusterRole
+  name: elastic-agent
+  apiGroup: rbac.authorization.k8s.io
+EOF
 ```
 
 ## helm 安装 eck
